@@ -12,10 +12,16 @@ jobs:
           java-version: 17
       - name: Configure Git
         run: git config --global user.email "no-reply@github.com" && git config --global user.name "Github Actions"
+      - name: Pull Gradle Cache
+        uses: actions/cache@v2
+        id: gradle-cache
+        with:
+          path: ~/.gradle
+          key: ${{ runner.os }}-maven-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties') }}-java-${{ matrix.java }}
       - name: Patch
         run: ./gradlew applyPatches --stacktrace
       - name: Get MC Version
-        run: echo "::set-output name=mcver::$(grep mcVersion gradle.properties | awk '{print $3;}')"
+        run: echo "::set-output name=mcver::$(grep version gradle.properties | awk '{print $3;}')"
         id: mcver
       - name: Build
         run: |
@@ -25,4 +31,4 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: Hurricane
-          path: build/libs/hurricane-paperclip-${{ steps.mcver.outputs.mcver }}-R0.1-SNAPSHOT-reobf.jar
+          path: build/libs/hurricane-paperclip-${{ steps.mcver.outputs.mcver }}-reobf.jar
