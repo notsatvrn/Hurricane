@@ -1,0 +1,1025 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: notsatvrn <satvrn@gmx.com>
+Date: Wed, 24 Aug 2022 17:01:56 +0000
+Subject: [PATCH] Server Classes
+
+diff --git a/src/main/java/com/notsatvrn/hurricane/accel/Device.java b/src/main/java/com/notsatvrn/hurricane/accel/Device.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..5dca4103c4e098ab648c7df6b01600ad0c021b84
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/accel/Device.java
+@@ -0,0 +1,14 @@
++package com.notsatvrn.hurricane.accel;
++
++import com.notsatvrn.hurricane.accel.random.ImprovedRandom;
++
++public interface Device {
++  public void destroy();
++
++  public ImprovedRandom random();
++  
++  public ImprovedRandom random(long seed);
++
++  public String getType();
++}
++
+diff --git a/src/main/java/com/notsatvrn/hurricane/accel/DeviceUtil.java b/src/main/java/com/notsatvrn/hurricane/accel/DeviceUtil.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..d84d747191d02157d40ffa271b58c0c42a3d7559
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/accel/DeviceUtil.java
+@@ -0,0 +1,103 @@
++package com.notsatvrn.hurricane.accel;
++
++import com.notsatvrn.hurricane.accel.Device;
++import com.notsatvrn.hurricane.accel.device.CLDevice;
++import com.notsatvrn.hurricane.accel.device.CPUDevice;
++import com.notsatvrn.hurricane.config.HurricaneConfig;
++import com.notsatvrn.hurricane.accel.random.ImprovedRandom;
++
++import static org.jocl.CL.CL_DEVICE_TYPE_ALL;
++import static org.jocl.CL.CL_CONTEXT_PLATFORM;
++import static org.jocl.CL.clGetPlatformIDs;
++import static org.jocl.CL.clGetDeviceIDs;
++
++import org.jocl.cl_platform_id;
++import org.jocl.cl_device_id;
++import org.jocl.cl_context_properties;
++import org.jocl.cl_queue_properties;
++import org.jocl.cl_kernel;
++
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.ArrayList;
++
++import org.bukkit.Bukkit;
++import java.util.logging.Level;
++import java.util.logging.Logger;
++
++public class DeviceUtil {
++  public static final Logger LOGGER = Bukkit.getLogger();
++  public static ArrayList<Device> devices = new ArrayList();
++  public static int deviceCount = 0;
++  public static ConcurrentHashMap<Integer, Device> deviceConfig = new ConcurrentHashMap();
++  public static cl_context_properties ctxProp = null;
++  public static cl_queue_properties queueProp = null;
++
++  public static void populateDevices() {
++    devices.add(new CPUDevice());
++    deviceCount++;
++
++    int[] npa = new int[1];
++    clGetPlatformIDs(0, null, npa);
++    int np = npa[0];
++
++    cl_platform_id[] pa = new cl_platform_id[np];
++    clGetPlatformIDs(np, pa, null);
++    cl_platform_id p = pa[0];
++
++    ctxProp = new cl_context_properties();
++    ctxProp.addProperty(CL_CONTEXT_PLATFORM, p);
++
++    int[] nda = new int[1];
++    clGetDeviceIDs(p, CL_DEVICE_TYPE_ALL, 0, null, nda);
++    int nd = nda[0];
++
++    cl_device_id[] da = new cl_device_id[nd];
++    clGetDeviceIDs(p, CL_DEVICE_TYPE_ALL, nd, da, null);
++
++    queueProp = new cl_queue_properties();
++    
++    for (int i = 0; i < da.length; i++) {
++      devices.add(new CLDevice(da[i]));
++    }
++  }
++
++  public static void configureDevices() {
++    int dc = devices.size();
++    long rngBestTime = Long.MAX_VALUE;
++    int rngBestDeviceID = 0;
++    Device rngBestDevice = null;
++
++    for (int i = 0; i < dc; i++) {
++      Device device = devices.get(i);
++      LOGGER.log(Level.INFO, "[Hurricane] Testing RNG on device " + Integer.toString(i) + " (" + device.getType() + ") (100,000,000 random 64-bit integers)...");
++      ImprovedRandom rng = device.random();
++
++      long start = System.nanoTime();
++      rng.nextLongs(100_000_000);
++      long end = System.nanoTime();
++      long result = end - start;
++      LOGGER.log(Level.INFO, "[Hurricane] Took " + Long.toString(result) + " nanoseconds.");
++      if (result < rngBestTime) {
++        rngBestTime = result;
++        rngBestDeviceID = i;
++        rngBestDevice = device;
++      }
++      rng.destroy();
++    }
++
++    LOGGER.log(Level.INFO, "[Hurricane] Best RNG device: " + Integer.toString(rngBestDeviceID) + " (" + rngBestDevice.getType() + ").");
++
++    deviceConfig.put(0, rngBestDevice);
++  }
++
++  public static void destroyDevices() {
++    for (int i = 0; i < devices.size(); i++) {
++      devices.get(i).destroy();
++    } 
++  }
++
++  public static Device best(byte task) {
++    return deviceConfig.get(task);
++  }
++}
++
+diff --git a/src/main/java/com/notsatvrn/hurricane/accel/device/CLDevice.java b/src/main/java/com/notsatvrn/hurricane/accel/device/CLDevice.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..49662f781466c1afed29ab07260126edeb510ccc
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/accel/device/CLDevice.java
+@@ -0,0 +1,47 @@
++package com.notsatvrn.hurricane.accel.device;
++
++import com.notsatvrn.hurricane.accel.random.ImprovedRandom;
++import com.notsatvrn.hurricane.accel.random.CLRandom;
++import com.notsatvrn.hurricane.accel.DeviceUtil;
++import com.notsatvrn.hurricane.accel.Device;
++
++import static org.jocl.CL.clCreateCommandQueueWithProperties;
++import static org.jocl.CL.clReleaseCommandQueue;
++import static org.jocl.CL.clReleaseContext;
++import static org.jocl.CL.clCreateContext;
++
++import org.jocl.cl_command_queue;
++import org.jocl.cl_device_id;
++import org.jocl.cl_context;
++
++public class CLDevice implements Device {
++  public cl_device_id device = null;
++  public cl_context ctx = null;
++  public cl_command_queue queue = null;
++
++  public CLDevice(cl_device_id dev) {
++    this.device = dev;
++    this.ctx = clCreateContext(
++      DeviceUtil.ctxProp, 1, new cl_device_id[]{dev},
++      null, null, null);
++    this.queue = clCreateCommandQueueWithProperties(
++      this.ctx, dev, DeviceUtil.queueProp, null);
++  }
++
++  public void destroy() {
++    clReleaseCommandQueue(this.queue);
++    clReleaseContext(this.ctx);
++  }
++
++  public ImprovedRandom random() {
++    return new CLRandom(this);
++  }
++
++  public ImprovedRandom random(long seed) {
++    return new CLRandom(this, seed);
++  }
++
++  public String getType() {
++    return "OpenCL";
++  }
++}
+diff --git a/src/main/java/com/notsatvrn/hurricane/accel/device/CPUDevice.java b/src/main/java/com/notsatvrn/hurricane/accel/device/CPUDevice.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..7019e80c171fa787161faaf62ca3e6f1d3388a4b
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/accel/device/CPUDevice.java
+@@ -0,0 +1,26 @@
++package com.notsatvrn.hurricane.accel.device;
++
++import com.notsatvrn.hurricane.accel.random.ImprovedRandom;
++import com.notsatvrn.hurricane.accel.random.CPURandom;
++import com.notsatvrn.hurricane.accel.Device;
++
++public class CPUDevice implements Device {
++  public CPUDevice() {
++  }
++
++  public void destroy() {
++  }
++
++  public ImprovedRandom random() {
++    return new CPURandom();
++  }
++
++  public ImprovedRandom random(long seed) {
++    return new CPURandom(seed);
++  }
++
++  public String getType() {
++    return "CPU";
++  }
++}
++
+diff --git a/src/main/java/com/notsatvrn/hurricane/accel/random/CLRandom.java b/src/main/java/com/notsatvrn/hurricane/accel/random/CLRandom.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..26beaa62033444dbf2c29d3ebd82fb20ac135e18
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/accel/random/CLRandom.java
+@@ -0,0 +1,214 @@
++package com.notsatvrn.hurricane.accel.random;
++
++import static org.jocl.CL.clCreateProgramWithSource;
++import static org.jocl.CL.clEnqueueNDRangeKernel;
++import static org.jocl.CL.clEnqueueReadBuffer;
++import static org.jocl.CL.clReleaseMemObject;
++import static org.jocl.CL.clReleaseProgram;
++import static org.jocl.CL.clReleaseKernel;
++import static org.jocl.CL.clCreateBuffer;
++import static org.jocl.CL.clCreateKernel;
++import static org.jocl.CL.clBuildProgram;
++import static org.jocl.CL.clSetKernelArg;
++import static org.jocl.CL.CL_MEM_READ_ONLY;
++import static org.jocl.CL.CL_MEM_COPY_HOST_PTR;
++import static org.jocl.CL.CL_MEM_READ_WRITE;
++import static org.jocl.CL.CL_TRUE;
++
++import org.jocl.Sizeof;
++import org.jocl.Pointer;
++import org.jocl.cl_mem;
++import org.jocl.cl_kernel;
++import org.jocl.cl_context;
++import org.jocl.cl_program;
++
++import com.notsatvrn.hurricane.accel.random.IImprovedRandom;
++import com.notsatvrn.hurricane.accel.random.ImprovedRandom;
++import com.notsatvrn.hurricane.accel.device.CLDevice;
++
++import java.util.concurrent.atomic.AtomicLong;
++import java.util.Arrays;
++
++import lombok.NonNull;
++
++public class CLRandom extends ImprovedRandom implements IImprovedRandom {
++    public long x = IImprovedRandom.createSeed();
++    public long y = 362436069L;
++    public long z = 521288629L;
++    public long w = 88675123L;
++    public long v = 5783321L;
++    public long d = 6615241L;
++
++    private static final String[] kernelStringMulti = new String[]{"""
++    __kernel void nextLongs(__global const long long *id, __global long long *od) {
++        long long t, x, y, z, w, v, d, n;
++        int gid = get_global_id(0);
++        x = id[gid];
++        y = id[gid+1];
++        z = id[gid+2];
++        w = id[gid+3];
++        v = id[gid+4];
++        d = id[gid+5];
++        n = id[gid+6];
++        
++        for (int i = 0; i < n; ++i) {
++            t = (x ^ (x >> 2));
++            x = y;
++            y = z;
++            z = w;
++            w = v;
++            v = (v ^ (v << 4)) ^ (t ^ (t << 1));
++            od[gid+6+i] = (d += 362437) + v;
++        }
++
++        od[gid] = x;
++        od[gid+1] = y;
++        od[gid+2] = z;
++        od[gid+3] = w;
++        od[gid+4] = v;
++        od[gid+5] = d;
++    }
++    """};
++    private static final String[] kernelStringSingle = new String[]{"""
++    __kernel void nextLong(__global const long long *id, __global long long *od) {
++        long long t, x, v;
++        int gid = get_global_id(0);
++        x = id[gid];
++        v = id[gid+4];
++        
++        t = (x ^ (x >> 2));
++        od[gid] = id[gid+1];
++        od[gid+1] = id[gid+2];
++        od[gid+2] = id[gid+3];
++        od[gid+3] = v;
++        v = (v ^ (v << 4)) ^ (t ^ (t << 1));
++        t = (od[gid+5] = id[gid+5] + 362437) + v;
++
++        od[gid+4] = v;
++    }
++    """};
++    private CLDevice device = null;
++    private cl_program programMulti = null;
++    private cl_program programSingle = null;
++    private static final long size7 = Sizeof.cl_long * 7;
++    private static final long size6 = Sizeof.cl_long * 6;
++
++    public CLRandom(@NonNull CLDevice dev) {
++        super();
++        setupDevice(dev);
++    }
++
++    public CLRandom(@NonNull CLDevice dev, long seed) {
++        super(seed);
++        setupDevice(dev);
++    }
++
++    public void setupDevice(@NonNull CLDevice dev) {
++        this.device = dev;
++        this.programMulti = clCreateProgramWithSource(this.device.ctx,
++            1, kernelStringMulti, null, null);
++        clBuildProgram(this.programMulti, 0, null, null, null, null);
++        this.programSingle = clCreateProgramWithSource(this.device.ctx,
++            1, kernelStringSingle, null, null);
++        clBuildProgram(this.programSingle, 0, null, null, null, null);
++    }
++
++    @Override
++    public long nextLong() {
++        long[] inData = new long[]{this.x, this.y, this.z, this.w, this.v, this.d};
++        long[] outData = new long[7];
++
++        cl_mem inputMemAddress = clCreateBuffer(this.device.ctx,
++            CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
++            size6, Pointer.to(inData), null);
++        cl_mem outputMemAddress = clCreateBuffer(this.device.ctx,
++            CL_MEM_READ_WRITE,
++            size7, null, null);
++
++        cl_kernel kernel = clCreateKernel(this.programSingle, "nextLong", null);
++
++        clSetKernelArg(kernel, 0, Sizeof.cl_mem, Pointer.to(inputMemAddress));
++        clSetKernelArg(kernel, 1, Sizeof.cl_mem, Pointer.to(outputMemAddress));
++
++        clEnqueueNDRangeKernel(this.device.queue, kernel, 1, null,
++            new long[]{1}, null, 0, null, null);
++
++        clEnqueueReadBuffer(this.device.queue, outputMemAddress, CL_TRUE, 0,
++            Sizeof.cl_long, Pointer.to(outData), 0, null, null);
++
++        clReleaseMemObject(inputMemAddress);
++        clReleaseMemObject(outputMemAddress);
++        clReleaseKernel(kernel);
++
++        this.x = outData[0];
++        this.y = outData[1];
++        this.z = outData[2];
++        this.w = outData[3];
++        this.v = outData[4];
++        this.d = outData[5];
++
++        return outData[6];
++    }
++
++    @Override
++    public long[] nextLongs(int n) {
++        int ol = 6 + n;
++        long outSize = Sizeof.cl_long * ol;
++
++        long[] inData = new long[]{this.x, this.y, this.z, this.w, this.v, this.d, n};
++        long[] outData = new long[ol];
++        long[] resultData = new long[n];
++
++        cl_mem inputMemAddress = clCreateBuffer(this.device.ctx,
++            CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
++            size7, Pointer.to(inData), null);
++        cl_mem outputMemAddress = clCreateBuffer(this.device.ctx,
++            CL_MEM_READ_WRITE,
++            outSize, null, null);
++
++        cl_kernel kernel = clCreateKernel(this.programMulti, "nextLongs", null);
++
++        clSetKernelArg(kernel, 0, Sizeof.cl_mem, Pointer.to(inputMemAddress));
++        clSetKernelArg(kernel, 1, Sizeof.cl_mem, Pointer.to(outputMemAddress));
++
++        clEnqueueNDRangeKernel(this.device.queue, kernel, 1, null,
++            new long[]{n}, null, 0, null, null);
++
++        clEnqueueReadBuffer(this.device.queue, outputMemAddress, CL_TRUE, 0,
++            outSize, Pointer.to(outData), 0, null, null);
++
++        clReleaseMemObject(inputMemAddress);
++        clReleaseMemObject(outputMemAddress);
++        clReleaseKernel(kernel);
++
++        this.x = outData[0];
++        this.y = outData[1];
++        this.z = outData[2];
++        this.w = outData[3];
++        this.v = outData[4];
++        this.d = outData[5];
++
++        return Arrays.copyOfRange(outData, 7, ol);
++
++        /*for (i = 6; i < ol; i++) {
++            resultData[i] = output_data[i];
++        }
++
++        return resultData;*/
++    }
++
++    public void destroy() {
++        clReleaseProgram(this.programMulti);
++        clReleaseProgram(this.programSingle);
++    }
++
++    public void reset(long seed) {
++        x = seed;
++        y = 362436069L;
++        z = 521288629L;
++        w = 88675123L;
++        v = 5783321L;
++        d = 6615241L;
++    }
++}
++
+diff --git a/src/main/java/com/notsatvrn/hurricane/accel/random/CPURandom.java b/src/main/java/com/notsatvrn/hurricane/accel/random/CPURandom.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..aaf956979d67bfd25d410faedccaa81d3e90dc95
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/accel/random/CPURandom.java
+@@ -0,0 +1,41 @@
++package com.notsatvrn.hurricane.accel.random;
++
++import com.notsatvrn.hurricane.accel.random.IImprovedRandom;
++import com.notsatvrn.hurricane.accel.random.ImprovedRandom;
++
++public class CPURandom extends ImprovedRandom implements IImprovedRandom {
++    public long x = IImprovedRandom.createSeed();
++    public long y = 362436069L;
++    public long z = 521288629L;
++    public long w = 88675123L;
++    public long v = 5783321L;
++    public long d = 6615241L;
++
++    public CPURandom() {
++        super();
++    }
++
++    public CPURandom(long seed) {
++        super(seed);
++    }
++
++    public long nextLong() {
++        long t = (x ^ (x >> 2));
++        x = y;
++        y = z;
++        z = w;
++        w = v;
++        v = (v ^ (v << 4)) ^ (t ^ (t << 1));
++        return (d += 362437) + v;
++    }
++
++    public void reset(long seed) {
++        x = seed;
++        y = 362436069L;
++        z = 521288629L;
++        w = 88675123L;
++        v = 5783321L;
++        d = 6615241L;
++    }
++}
++
+diff --git a/src/main/java/com/notsatvrn/hurricane/accel/random/IImprovedRandom.java b/src/main/java/com/notsatvrn/hurricane/accel/random/IImprovedRandom.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..0acfd405eefceb55fc4db5088019315d97ca3376
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/accel/random/IImprovedRandom.java
+@@ -0,0 +1,34 @@
++package com.notsatvrn.hurricane.accel.random;
++
++import java.util.concurrent.atomic.AtomicLong;
++
++public interface IImprovedRandom {
++    static final long multiplier = 0x5DEECE66DL;
++    static final long mask = (1L << 48) - 1;
++    static long seedUniquifier() {
++        for (;;) {
++            long current = seedUniquifier.get();
++            long next = current * 1181783497276652981L;
++            if (seedUniquifier.compareAndSet(current, next)) {
++                return next;
++            }
++        }
++    }
++    static final AtomicLong seedUniquifier = new AtomicLong(8682522807148012L);
++    static long initialScramble(long seed) {
++        return (seed ^ multiplier) & mask;
++    }
++
++    static long createSeed() {
++        return initialScramble(seedUniquifier() ^ System.nanoTime());
++    }
++
++    default public void destroy() {
++    }
++
++    default public void reset() {
++        reset(createSeed());
++    }
++
++    public void reset(long seed);
++}
+diff --git a/src/main/java/com/notsatvrn/hurricane/accel/random/ImprovedRandom.java b/src/main/java/com/notsatvrn/hurricane/accel/random/ImprovedRandom.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..448665cba41e088c03df2ab60fda700dd9b12b9f
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/accel/random/ImprovedRandom.java
+@@ -0,0 +1,99 @@
++package com.notsatvrn.hurricane.accel.random;
++
++import com.notsatvrn.hurricane.util.MathUtil;
++import com.notsatvrn.hurricane.accel.random.IImprovedRandom;
++
++import java.util.Random;
++
++public class ImprovedRandom extends Random implements IImprovedRandom {
++    public ImprovedRandom() {
++        reset(IImprovedRandom.createSeed());
++    }
++
++    public ImprovedRandom(long seed) {
++        reset(seed);
++    }
++
++    @Override
++    protected int next(int bits) {
++        return (int)(nextLong() >>> (64 - bits));
++    }
++
++    @Override
++    public int nextInt() {
++        return MathUtil.long2int(nextLong());
++    }
++
++    @Override
++    public double nextDouble() {
++        return MathUtil.long2double(nextLong());
++    }
++
++    @Override
++    public float nextFloat() {
++        return MathUtil.long2float(nextLong());
++    }
++
++    @Override
++    public boolean nextBoolean() {
++        return MathUtil.long2boolean(nextLong());
++    }
++
++    @Override
++    public void setSeed(long seed) {
++        reset(seed);
++    }
++
++    @Override
++    public void reset(long seed) {
++    }
++
++    public int[] nextInts(int n) {
++        int[] data = new int[n];
++        for (int i = 0; i < n; i++) {
++            data[i] = nextInt();
++        }
++        return data;
++    }
++
++    public long[] nextLongs(int n) {
++        long[] data = new long[n];
++        for (int i = 0; i < n; i++) {
++            data[i] = nextLong();
++        }
++        return data;
++    }
++
++    public boolean[] nextBooleans(int n) {
++        boolean[] data = new boolean[n];
++        for (int i = 0; i < n; i++) {
++            data[i] = nextBoolean();
++        }
++        return data;
++    }
++
++    public float[] nextFloats(int n) {
++        float[] data = new float[n];
++        for (int i = 0; i < n; i++) {
++            data[i] = nextFloat();
++        }
++        return data;
++    }
++
++    public double[] nextDoubles(int n) {
++        double[] data = new double[n];
++        for (int i = 0; i < n; i++) {
++            data[i] = nextDouble();
++        }
++        return data;
++    }
++
++    public double[] nextGaussians(int n) {
++        double[] data = new double[n];
++        for (int i = 0; i < n; i++) {
++            data[i] = nextGaussian();
++        }
++        return data;
++    }
++}
++
+diff --git a/src/main/java/com/notsatvrn/hurricane/commands/HurricaneCommand.java b/src/main/java/com/notsatvrn/hurricane/commands/HurricaneCommand.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..e7e156294c1e7f4fdadaa1545cb9523cc9f47b17
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/commands/HurricaneCommand.java
+@@ -0,0 +1,73 @@
++package com.notsatvrn.hurricane.commands;
++
++import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.level.ServerLevel;
++import org.bukkit.ChatColor;
++import org.bukkit.Location;
++import org.bukkit.command.Command;
++import org.bukkit.command.CommandSender;
++import com.notsatvrn.hurricane.config.HurricaneConfig;
++
++import java.io.File;
++import java.util.Collections;
++import java.util.List;
++import java.util.stream.Collectors;
++import java.util.stream.Stream;
++
++public class HurricaneCommand extends Command {
++    public HurricaneCommand(String name) {
++        super(name);
++        this.description = "Hurricane related commands";
++        this.usageMessage = "/hurricane [reload | version]";
++        this.setPermission("bukkit.command.hurricane");
++    }
++
++    @Override
++    public List<String> tabComplete(CommandSender sender, String alias, String[] args, Location location) throws IllegalArgumentException {
++        if (args.length == 1) {
++            return Stream.of("reload", "version")
++                    .filter(arg -> arg.startsWith(args[0].toLowerCase()))
++                    .collect(Collectors.toList());
++        }
++        return Collections.emptyList();
++    }
++
++    @Override
++    public boolean execute(CommandSender sender, String commandLabel, String[] args) {
++        if (!testPermission(sender)) return true;
++
++        if (args.length != 1) {
++            sender.sendMessage(ChatColor.RED + "Usage: " + usageMessage);
++            return false;
++        }
++
++        switch (args[0].toLowerCase()) {
++            case "reload":
++                Command.broadcastCommandMessage(sender, ChatColor.RED + "Please note that this command is not supported and may cause issues.");
++                Command.broadcastCommandMessage(sender, ChatColor.RED + "If you encounter any issues please use the /stop command to restart your server.");
++
++                MinecraftServer console = MinecraftServer.getServer();
++                HurricaneConfig.init((File) console.options.valueOf("hurricane-settings"));
++                for (ServerLevel level : console.getAllLevels()) {
++                    level.hurricaneConfig.init();
++                    level.resetBreedingCooldowns();
++                }
++                console.server.reloadCount++;
++
++                Command.broadcastCommandMessage(sender, ChatColor.GREEN + "Hurricane config reload complete.");
++                break;
++            case "version":
++                Command verCmd = org.bukkit.Bukkit.getServer().getCommandMap().getCommand("version");
++                if (verCmd != null) {
++                    return verCmd.execute(sender, commandLabel, new String[0]);
++                }
++                break;
++            default:
++                sender.sendMessage(ChatColor.RED + "Usage: " + usageMessage);
++                return false;
++        }
++
++        return true;
++    }
++}
++
+diff --git a/src/main/java/com/notsatvrn/hurricane/config/HurricaneConfig.java b/src/main/java/com/notsatvrn/hurricane/config/HurricaneConfig.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..f6ac13bb346acc93d5ebe606346d864858590d20
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/config/HurricaneConfig.java
+@@ -0,0 +1,155 @@
++package com.notsatvrn.hurricane.config;
++
++import com.google.common.base.Throwables;
++import com.google.common.collect.ImmutableMap;
++import net.minecraft.server.MinecraftServer;
++import org.bukkit.Bukkit;
++import org.bukkit.command.Command;
++import org.bukkit.configuration.ConfigurationSection;
++import org.bukkit.configuration.InvalidConfigurationException;
++import org.bukkit.configuration.file.YamlConfiguration;
++import com.notsatvrn.hurricane.commands.HurricaneCommand;
++
++import java.io.File;
++import java.io.IOException;
++import java.lang.reflect.InvocationTargetException;
++import java.lang.reflect.Method;
++import java.lang.reflect.Modifier;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++import java.util.logging.Level;
++
++@SuppressWarnings("unused")
++public class HurricaneConfig {
++    private static final String HEADER = "This is the main configuration file for Hurricane.\n"
++            + "As you can see, there's tons to configure. Some options may impact gameplay, so use\n"
++            + "with caution, and make sure you know what each option does before configuring.\n";
++    private static File CONFIG_FILE;
++    public static YamlConfiguration config;
++
++    private static Map<String, Command> commands;
++
++    public static int version;
++    static boolean verbose;
++
++    public static void init(File configFile) {
++        CONFIG_FILE = configFile;
++        config = new YamlConfiguration();
++        try {
++            config.load(CONFIG_FILE);
++        } catch (IOException ignore) {
++        } catch (InvalidConfigurationException ex) {
++            Bukkit.getLogger().log(Level.SEVERE, "Could not load hurricane.yml, please correct your syntax errors", ex);
++            throw Throwables.propagate(ex);
++        }
++        config.options().header(HEADER);
++        config.options().copyDefaults(true);
++        verbose = getBoolean("verbose", false);
++
++        commands = new HashMap<>();
++        commands.put("hurricane", new HurricaneCommand("hurricane"));
++
++        version = getInt("config-version", 1);
++        set("config-version", 1);
++
++        readConfig(HurricaneConfig.class, null);
++    }
++
++    protected static void log(String s) {
++        if (verbose) {
++            log(Level.INFO, s);
++        }
++    }
++
++    protected static void log(Level level, String s) {
++        Bukkit.getLogger().log(level, s);
++    }
++
++    public static void registerCommands() {
++        for (Map.Entry<String, Command> entry : commands.entrySet()) {
++            MinecraftServer.getServer().server.getCommandMap().register(entry.getKey(), "Hurricane", entry.getValue());
++        }
++    }
++
++    static void readConfig(Class<?> clazz, Object instance) {
++        for (Method method : clazz.getDeclaredMethods()) {
++            if (Modifier.isPrivate(method.getModifiers())) {
++                if (method.getParameterTypes().length == 0 && method.getReturnType() == Void.TYPE) {
++                    try {
++                        method.setAccessible(true);
++                        method.invoke(instance);
++                    } catch (InvocationTargetException ex) {
++                        throw Throwables.propagate(ex.getCause());
++                    } catch (Exception ex) {
++                        Bukkit.getLogger().log(Level.SEVERE, "Error invoking " + method, ex);
++                    }
++                }
++            }
++        }
++
++        try {
++            config.save(CONFIG_FILE);
++        } catch (IOException ex) {
++            Bukkit.getLogger().log(Level.SEVERE, "Could not save " + CONFIG_FILE, ex);
++        }
++    }
++
++    private static void set(String path, Object val) {
++        config.addDefault(path, val);
++        config.set(path, val);
++    }
++
++    private static String getString(String path, String def) {
++        config.addDefault(path, def);
++        return config.getString(path, config.getString(path));
++    }
++
++    private static boolean getBoolean(String path, boolean def) {
++        config.addDefault(path, def);
++        return config.getBoolean(path, config.getBoolean(path));
++    }
++
++    private static double getDouble(String path, double def) {
++        config.addDefault(path, def);
++        return config.getDouble(path, config.getDouble(path));
++    }
++
++    private static int getInt(String path, int def) {
++        config.addDefault(path, def);
++        return config.getInt(path, config.getInt(path));
++    }
++
++    private static <T> List getList(String path, T def) {
++        config.addDefault(path, def);
++        return config.getList(path, config.getList(path));
++    }
++
++    static Map<String, Object> getMap(String path, Map<String, Object> def) {
++        if (def != null && config.getConfigurationSection(path) == null) {
++            config.addDefault(path, def);
++            return def;
++        }
++        return toMap(config.getConfigurationSection(path));
++    }
++
++    private static Map<String, Object> toMap(ConfigurationSection section) {
++        ImmutableMap.Builder<String, Object> builder = ImmutableMap.builder();
++        if (section != null) {
++            for (String key : section.getKeys(false)) {
++                Object obj = section.get(key);
++                if (obj != null) {
++                    builder.put(key, obj instanceof ConfigurationSection val ? toMap(val) : obj);
++                }
++            }
++        }
++        return builder.build();
++    }
++
++    // Prefer Accelerated Random
++    public static boolean acceleratedRandom = false;
++    private static void acceleratedRandom() {
++        acceleratedRandom = getBoolean("settings.acceleration.random", acceleratedRandom);
++    }
++}
++
+diff --git a/src/main/java/com/notsatvrn/hurricane/config/HurricaneWorldConfig.java b/src/main/java/com/notsatvrn/hurricane/config/HurricaneWorldConfig.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..de9a7340dea8d17339f905ef0f4132da0c0e7a11
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/config/HurricaneWorldConfig.java
+@@ -0,0 +1,78 @@
++package com.notsatvrn.hurricane.config;
++
++import net.minecraft.server.level.ServerLevel;
++import org.apache.commons.lang.BooleanUtils;
++import org.bukkit.configuration.ConfigurationSection;
++
++import java.util.List;
++import java.util.Map;
++import java.util.function.Predicate;
++
++import static com.notsatvrn.hurricane.config.HurricaneConfig.log;
++
++@SuppressWarnings("unused")
++public class HurricaneWorldConfig {
++    private final String worldName;
++
++    public HurricaneWorldConfig(String worldName) {
++        this.worldName = worldName;
++        init();
++    }
++
++    public void init() {
++        log("-------- World Settings For [" + worldName + "] --------");
++        HurricaneConfig.readConfig(HurricaneWorldConfig.class, this);
++    }
++
++    private void set(String path, Object val) {
++        HurricaneConfig.config.addDefault("world-settings.default." + path, val);
++        HurricaneConfig.config.set("world-settings.default." + path, val);
++        if (HurricaneConfig.config.get("world-settings." + worldName + "." + path) != null) {
++            HurricaneConfig.config.addDefault("world-settings." + worldName + "." + path, val);
++            HurricaneConfig.config.set("world-settings." + worldName + "." + path, val);
++        }
++    }
++
++    private ConfigurationSection getConfigurationSection(String path) {
++        ConfigurationSection section = HurricaneConfig.config.getConfigurationSection("world-settings." + worldName + "." + path);
++        return section != null ? section : HurricaneConfig.config.getConfigurationSection("world-settings.default." + path);
++    }
++
++    private String getString(String path, String def) {
++        HurricaneConfig.config.addDefault("world-settings.default." + path, def);
++        return HurricaneConfig.config.getString("world-settings." + worldName + "." + path, HurricaneConfig.config.getString("world-settings.default." + path));
++    }
++
++    private boolean getBoolean(String path, boolean def) {
++        HurricaneConfig.config.addDefault("world-settings.default." + path, def);
++        return HurricaneConfig.config.getBoolean("world-settings." + worldName + "." + path, HurricaneConfig.config.getBoolean("world-settings.default." + path));
++    }
++
++    private boolean getBoolean(String path, Predicate<Boolean> predicate) {
++        String val = getString(path, "default").toLowerCase();
++        Boolean bool = BooleanUtils.toBooleanObject(val, "true", "false", "default");
++        return predicate.test(bool);
++    }
++
++    private double getDouble(String path, double def) {
++        HurricaneConfig.config.addDefault("world-settings.default." + path, def);
++        return HurricaneConfig.config.getDouble("world-settings." + worldName + "." + path, HurricaneConfig.config.getDouble("world-settings.default." + path));
++    }
++
++    private int getInt(String path, int def) {
++        HurricaneConfig.config.addDefault("world-settings.default." + path, def);
++        return HurricaneConfig.config.getInt("world-settings." + worldName + "." + path, HurricaneConfig.config.getInt("world-settings.default." + path));
++    }
++
++    private <T> List<?> getList(String path, T def) {
++        HurricaneConfig.config.addDefault("world-settings.default." + path, def);
++        return HurricaneConfig.config.getList("world-settings." + worldName + "." + path, HurricaneConfig.config.getList("world-settings.default." + path));
++    }
++
++    private Map<String, Object> getMap(String path, Map<String, Object> def) {
++        final Map<String, Object> fallback = HurricaneConfig.getMap("world-settings.default." + path, def);
++        final Map<String, Object> value = HurricaneConfig.getMap("world-settings." + worldName + "." + path, null);
++        return value.isEmpty() ? fallback : value;
++    }
++}
++
+diff --git a/src/main/java/com/notsatvrn/hurricane/util/Constants.java b/src/main/java/com/notsatvrn/hurricane/util/Constants.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..6bd83144406fc13a3cecd98d04fa2272ea117da6
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/util/Constants.java
+@@ -0,0 +1,11 @@
++package com.notsatvrn.hurricane.util;
++
++public final class Constants {
++    public static final Object[] EMPTY_object = new Object[0];
++    public static final int[] EMPTY_int = new int[0];
++    public static final int[] ZERO_int = new int[]{0};
++    public static final byte[] EMPTY_byte = new byte[0];
++    public static final String[] EMPTY_string = new String[0];
++    public static final long[] EMPTY_long = new long[0];
++}
++
+diff --git a/src/main/java/com/notsatvrn/hurricane/util/EntryPoint.java b/src/main/java/com/notsatvrn/hurricane/util/EntryPoint.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..a9160e03cfa2acb7869e5506295060df060bea6e
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/util/EntryPoint.java
+@@ -0,0 +1,21 @@
++package com.notsatvrn.hurricane.util;
++
++import com.notsatvrn.hurricane.accel.DeviceUtil;
++
++import org.bukkit.Bukkit;
++import java.util.logging.Level;
++import java.util.logging.Logger;
++
++public class EntryPoint {
++    public static final Logger LOGGER = Bukkit.getLogger();
++
++    public static void start() {
++        LOGGER.log(Level.INFO, "[Hurricane] Starting...");
++        LOGGER.log(Level.INFO, "[Hurricane] Populating devices...");
++        DeviceUtil.populateDevices();
++        LOGGER.log(Level.INFO, "[Hurricane] Configuring devices...");
++        DeviceUtil.configureDevices();
++        LOGGER.log(Level.INFO, "[Hurricane] Started.");
++    }
++}
++
+diff --git a/src/main/java/com/notsatvrn/hurricane/util/MathUtil.java b/src/main/java/com/notsatvrn/hurricane/util/MathUtil.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..36bff19f2ad6e3ce63ca842396b4d6ea41a52d53
+--- /dev/null
++++ b/src/main/java/com/notsatvrn/hurricane/util/MathUtil.java
+@@ -0,0 +1,20 @@
++package com.notsatvrn.hurricane.util;
++
++public class MathUtil {
++    public static int long2int(long l) {
++        return (int) l >>> 32;
++    }
++
++    public static double long2double(long l) {
++        return (1+((double)(((double)l) / Long.MAX_VALUE)))/2;
++    }
++
++    public static float long2float(long l) {
++        return (1+((float)(((float)l) / Long.MAX_VALUE)))/2;
++    }
++
++    public static boolean long2boolean(long l) {
++        return (1 - (l >>> 63)) != 0;
++    }
++}
++

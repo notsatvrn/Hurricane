@@ -52,7 +52,6 @@ manifest.mf
 run/
 
 build-data/
-Tentacles-API
-Tentacles-MojangAPI
-Tentacles-Server
+hurricane-api
+hurricane-server
 *.jar

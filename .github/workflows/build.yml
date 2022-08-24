@@ -12,7 +12,17 @@ jobs:
           java-version: 17
       - name: Configure Git
         run: git config --global user.email "no-reply@github.com" && git config --global user.name "Github Actions"
-      - name: Apply patches
+      - name: Patch
         run: ./gradlew applyPatches --stacktrace
+      - name: Get MC Version
+        run: echo "::set-output name=mcver::$(grep mcVersion gradle.properties | awk '{print $3;}')"
+        id: mcver
       - name: Build
-        run: ./gradlew build --stacktrace
+        run: |
+          ./gradlew build -x test --stacktrace --no-daemon
+          ./gradlew createReobfPaperclipJar --stacktrace --no-daemon
+      - name: Archive Paperclip
+        uses: actions/upload-artifact@v2
+        with:
+          name: Hurricane
+          path: build/libs/hurricane-paperclip-${{ steps.mcver.outputs.mcver }}-R0.1-SNAPSHOT-reobf.jar
