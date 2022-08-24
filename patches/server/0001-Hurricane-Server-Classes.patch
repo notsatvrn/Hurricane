@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: notsatvrn <satvrn@gmx.com>
-Date: Wed, 24 Aug 2022 17:01:56 +0000
+Date: Wed, 24 Aug 2022 20:12:45 +0000
 Subject: [PATCH] Server Classes
 
 diff --git a/src/main/java/com/notsatvrn/hurricane/accel/Device.java b/src/main/java/com/notsatvrn/hurricane/accel/Device.java
@@ -25,10 +25,10 @@ index 0000000000000000000000000000000000000000..5dca4103c4e098ab648c7df6b01600ad
 +
 diff --git a/src/main/java/com/notsatvrn/hurricane/accel/DeviceUtil.java b/src/main/java/com/notsatvrn/hurricane/accel/DeviceUtil.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..d84d747191d02157d40ffa271b58c0c42a3d7559
+index 0000000000000000000000000000000000000000..7a375bba534e594ddb6b156ca6b3c75fe4190450
 --- /dev/null
 +++ b/src/main/java/com/notsatvrn/hurricane/accel/DeviceUtil.java
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,102 @@
 +package com.notsatvrn.hurricane.accel;
 +
 +import com.notsatvrn.hurricane.accel.Device;
@@ -51,12 +51,11 @@ index 0000000000000000000000000000000000000000..d84d747191d02157d40ffa271b58c0c4
 +import java.util.concurrent.ConcurrentHashMap;
 +import java.util.ArrayList;
 +
-+import org.bukkit.Bukkit;
-+import java.util.logging.Level;
-+import java.util.logging.Logger;
++import com.mojang.logging.LogUtils;
++import org.slf4j.Logger;
 +
 +public class DeviceUtil {
-+  public static final Logger LOGGER = Bukkit.getLogger();
++  public static final Logger LOGGER = LogUtils.getLogger();
 +  public static ArrayList<Device> devices = new ArrayList();
 +  public static int deviceCount = 0;
 +  public static ConcurrentHashMap<Integer, Device> deviceConfig = new ConcurrentHashMap();
@@ -100,14 +99,14 @@ index 0000000000000000000000000000000000000000..d84d747191d02157d40ffa271b58c0c4
 +
 +    for (int i = 0; i < dc; i++) {
 +      Device device = devices.get(i);
-+      LOGGER.log(Level.INFO, "[Hurricane] Testing RNG on device " + Integer.toString(i) + " (" + device.getType() + ") (100,000,000 random 64-bit integers)...");
++      LOGGER.info("[Hurricane] Testing RNG on device " + Integer.toString(i) + " (" + device.getType() + ") (100,000,000 random 64-bit integers)...");
 +      ImprovedRandom rng = device.random();
 +
 +      long start = System.nanoTime();
 +      rng.nextLongs(100_000_000);
 +      long end = System.nanoTime();
 +      long result = end - start;
-+      LOGGER.log(Level.INFO, "[Hurricane] Took " + Long.toString(result) + " nanoseconds.");
++      LOGGER.info("[Hurricane] Took " + Long.toString(result) + " nanoseconds.");
 +      if (result < rngBestTime) {
 +        rngBestTime = result;
 +        rngBestDeviceID = i;
@@ -116,7 +115,7 @@ index 0000000000000000000000000000000000000000..d84d747191d02157d40ffa271b58c0c4
 +      rng.destroy();
 +    }
 +
-+    LOGGER.log(Level.INFO, "[Hurricane] Best RNG device: " + Integer.toString(rngBestDeviceID) + " (" + rngBestDevice.getType() + ").");
++    LOGGER.info("[Hurricane] Best RNG device: " + Integer.toString(rngBestDeviceID) + " (" + rngBestDevice.getType() + ").");
 +
 +    deviceConfig.put(0, rngBestDevice);
 +  }
@@ -134,10 +133,10 @@ index 0000000000000000000000000000000000000000..d84d747191d02157d40ffa271b58c0c4
 +
 diff --git a/src/main/java/com/notsatvrn/hurricane/accel/device/CLDevice.java b/src/main/java/com/notsatvrn/hurricane/accel/device/CLDevice.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..49662f781466c1afed29ab07260126edeb510ccc
+index 0000000000000000000000000000000000000000..8a549094a5ad9e19e37cb1b4141b280223e25c02
 --- /dev/null
 +++ b/src/main/java/com/notsatvrn/hurricane/accel/device/CLDevice.java
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,73 @@
 +package com.notsatvrn.hurricane.accel.device;
 +
 +import com.notsatvrn.hurricane.accel.random.ImprovedRandom;
@@ -149,15 +148,22 @@ index 0000000000000000000000000000000000000000..49662f781466c1afed29ab07260126ed
 +import static org.jocl.CL.clReleaseCommandQueue;
 +import static org.jocl.CL.clReleaseContext;
 +import static org.jocl.CL.clCreateContext;
++import static org.jocl.CL.clGetDeviceInfo;
++
++import static org.jocl.CL.CL_DEVICE_VERSION;
++import static org.jocl.CL.CL_DEVICE_NAME;
 +
 +import org.jocl.cl_command_queue;
 +import org.jocl.cl_device_id;
 +import org.jocl.cl_context;
++import org.jocl.Pointer;
 +
 +public class CLDevice implements Device {
 +  public cl_device_id device = null;
 +  public cl_context ctx = null;
 +  public cl_command_queue queue = null;
++  public String name = "";
++  public float version = 2.0f;
 +
 +  public CLDevice(cl_device_id dev) {
 +    this.device = dev;
@@ -166,6 +172,8 @@ index 0000000000000000000000000000000000000000..49662f781466c1afed29ab07260126ed
 +      null, null, null);
 +    this.queue = clCreateCommandQueueWithProperties(
 +      this.ctx, dev, DeviceUtil.queueProp, null);
++    this.name = getCLData(CL_DEVICE_NAME);
++    this.version = getCLVersion();
 +  }
 +
 +  public void destroy() {
@@ -183,6 +191,23 @@ index 0000000000000000000000000000000000000000..49662f781466c1afed29ab07260126ed
 +
 +  public String getType() {
 +    return "OpenCL";
++  }
++
++  public float getCLVersion() {
++    String deviceVersion = getCLData(CL_DEVICE_VERSION);
++    String versionString = deviceVersion.substring(7, 10);
++    float version = Float.parseFloat(versionString);
++    return version;
++  }
++
++  public String getCLData(int param) {
++    long[] size = new long[1];
++    clGetDeviceInfo(this.device, param, 0, null, size);
++
++    byte[] buffer = new byte[(int)size[0]];
++    clGetDeviceInfo(this.device, param, buffer.length, Pointer.to(buffer), null);
++
++    return new String(buffer, 0, buffer.length-1);
 +  }
 +}
 diff --git a/src/main/java/com/notsatvrn/hurricane/accel/device/CPUDevice.java b/src/main/java/com/notsatvrn/hurricane/accel/device/CPUDevice.java
@@ -219,10 +244,10 @@ index 0000000000000000000000000000000000000000..7019e80c171fa787161faaf62ca3e6f1
 +
 diff --git a/src/main/java/com/notsatvrn/hurricane/accel/random/CLRandom.java b/src/main/java/com/notsatvrn/hurricane/accel/random/CLRandom.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..26beaa62033444dbf2c29d3ebd82fb20ac135e18
+index 0000000000000000000000000000000000000000..a058c86f91d2028dc9088836dcd7fdb308922009
 --- /dev/null
 +++ b/src/main/java/com/notsatvrn/hurricane/accel/random/CLRandom.java
-@@ -0,0 +1,214 @@
+@@ -0,0 +1,168 @@
 +package com.notsatvrn.hurricane.accel.random;
 +
 +import static org.jocl.CL.clCreateProgramWithSource;
@@ -264,58 +289,24 @@ index 0000000000000000000000000000000000000000..26beaa62033444dbf2c29d3ebd82fb20
 +    public long v = 5783321L;
 +    public long d = 6615241L;
 +
-+    private static final String[] kernelStringMulti = new String[]{"""
-+    __kernel void nextLongs(__global const long long *id, __global long long *od) {
-+        long long t, x, y, z, w, v, d, n;
++    private static final String[] kernelString = new String[]{"""
++    __kernel void nextLong(__global long *id, __global long *ov) {
 +        int gid = get_global_id(0);
-+        x = id[gid];
-+        y = id[gid+1];
-+        z = id[gid+2];
-+        w = id[gid+3];
-+        v = id[gid+4];
-+        d = id[gid+5];
-+        n = id[gid+6];
-+        
-+        for (int i = 0; i < n; ++i) {
-+            t = (x ^ (x >> 2));
-+            x = y;
-+            y = z;
-+            z = w;
-+            w = v;
-+            v = (v ^ (v << 4)) ^ (t ^ (t << 1));
-+            od[gid+6+i] = (d += 362437) + v;
-+        }
-+
-+        od[gid] = x;
-+        od[gid+1] = y;
-+        od[gid+2] = z;
-+        od[gid+3] = w;
-+        od[gid+4] = v;
-+        od[gid+5] = d;
-+    }
-+    """};
-+    private static final String[] kernelStringSingle = new String[]{"""
-+    __kernel void nextLong(__global const long long *id, __global long long *od) {
-+        long long t, x, v;
-+        int gid = get_global_id(0);
-+        x = id[gid];
-+        v = id[gid+4];
-+        
-+        t = (x ^ (x >> 2));
-+        od[gid] = id[gid+1];
-+        od[gid+1] = id[gid+2];
-+        od[gid+2] = id[gid+3];
-+        od[gid+3] = v;
++        long x = id[gid];
++        long v = id[gid+4]; 
++        long t = (x ^ (x >> 2));
++        id[gid] = id[gid+1];
++        id[gid+1] = id[gid+2];
++        id[gid+2] = id[gid+3];
++        id[gid+3] = v;
 +        v = (v ^ (v << 4)) ^ (t ^ (t << 1));
-+        t = (od[gid+5] = id[gid+5] + 362437) + v;
++        ov[gid] = (id[gid+5] = id[gid+5] + 362437) + v;
 +
-+        od[gid+4] = v;
++        id[gid+4] = v;
 +    }
 +    """};
 +    private CLDevice device = null;
-+    private cl_program programMulti = null;
-+    private cl_program programSingle = null;
-+    private static final long size7 = Sizeof.cl_long * 7;
++    private cl_program program = null;
 +    private static final long size6 = Sizeof.cl_long * 6;
 +
 +    public CLRandom(@NonNull CLDevice dev) {
@@ -330,27 +321,24 @@ index 0000000000000000000000000000000000000000..26beaa62033444dbf2c29d3ebd82fb20
 +
 +    public void setupDevice(@NonNull CLDevice dev) {
 +        this.device = dev;
-+        this.programMulti = clCreateProgramWithSource(this.device.ctx,
-+            1, kernelStringMulti, null, null);
-+        clBuildProgram(this.programMulti, 0, null, null, null, null);
-+        this.programSingle = clCreateProgramWithSource(this.device.ctx,
-+            1, kernelStringSingle, null, null);
-+        clBuildProgram(this.programSingle, 0, null, null, null, null);
++        this.program = clCreateProgramWithSource(this.device.ctx,
++            1, kernelString, null, null);
++        clBuildProgram(this.program, 0, null, null, null, null);
 +    }
 +
 +    @Override
 +    public long nextLong() {
 +        long[] inData = new long[]{this.x, this.y, this.z, this.w, this.v, this.d};
-+        long[] outData = new long[7];
++        long[] outData = new long[1];
 +
 +        cl_mem inputMemAddress = clCreateBuffer(this.device.ctx,
-+            CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
++            CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
 +            size6, Pointer.to(inData), null);
 +        cl_mem outputMemAddress = clCreateBuffer(this.device.ctx,
 +            CL_MEM_READ_WRITE,
-+            size7, null, null);
++            Sizeof.cl_long, null, null);
 +
-+        cl_kernel kernel = clCreateKernel(this.programSingle, "nextLong", null);
++        cl_kernel kernel = clCreateKernel(this.program, "nextLong", null);
 +
 +        clSetKernelArg(kernel, 0, Sizeof.cl_mem, Pointer.to(inputMemAddress));
 +        clSetKernelArg(kernel, 1, Sizeof.cl_mem, Pointer.to(outputMemAddress));
@@ -365,33 +353,31 @@ index 0000000000000000000000000000000000000000..26beaa62033444dbf2c29d3ebd82fb20
 +        clReleaseMemObject(outputMemAddress);
 +        clReleaseKernel(kernel);
 +
-+        this.x = outData[0];
-+        this.y = outData[1];
-+        this.z = outData[2];
-+        this.w = outData[3];
-+        this.v = outData[4];
-+        this.d = outData[5];
++        this.x = inData[0];
++        this.y = inData[1];
++        this.z = inData[2];
++        this.w = inData[3];
++        this.v = inData[4];
++        this.d = inData[5];
 +
-+        return outData[6];
++        return outData[0];
 +    }
 +
 +    @Override
 +    public long[] nextLongs(int n) {
-+        int ol = 6 + n;
-+        long outSize = Sizeof.cl_long * ol;
++        long outSize = Sizeof.cl_long * n;
 +
-+        long[] inData = new long[]{this.x, this.y, this.z, this.w, this.v, this.d, n};
-+        long[] outData = new long[ol];
-+        long[] resultData = new long[n];
++        long[] inData = new long[]{this.x, this.y, this.z, this.w, this.v, this.d};
++        long[] outData = new long[n];
 +
 +        cl_mem inputMemAddress = clCreateBuffer(this.device.ctx,
 +            CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-+            size7, Pointer.to(inData), null);
++            size6, Pointer.to(inData), null);
 +        cl_mem outputMemAddress = clCreateBuffer(this.device.ctx,
 +            CL_MEM_READ_WRITE,
 +            outSize, null, null);
 +
-+        cl_kernel kernel = clCreateKernel(this.programMulti, "nextLongs", null);
++        cl_kernel kernel = clCreateKernel(this.program, "nextLong", null);
 +
 +        clSetKernelArg(kernel, 0, Sizeof.cl_mem, Pointer.to(inputMemAddress));
 +        clSetKernelArg(kernel, 1, Sizeof.cl_mem, Pointer.to(outputMemAddress));
@@ -406,25 +392,18 @@ index 0000000000000000000000000000000000000000..26beaa62033444dbf2c29d3ebd82fb20
 +        clReleaseMemObject(outputMemAddress);
 +        clReleaseKernel(kernel);
 +
-+        this.x = outData[0];
-+        this.y = outData[1];
-+        this.z = outData[2];
-+        this.w = outData[3];
-+        this.v = outData[4];
-+        this.d = outData[5];
++        this.x = inData[0];
++        this.y = inData[1];
++        this.z = inData[2];
++        this.w = inData[3];
++        this.v = inData[4];
++        this.d = inData[5];
 +
-+        return Arrays.copyOfRange(outData, 7, ol);
-+
-+        /*for (i = 6; i < ol; i++) {
-+            resultData[i] = output_data[i];
-+        }
-+
-+        return resultData;*/
++        return outData;
 +    }
 +
 +    public void destroy() {
-+        clReleaseProgram(this.programMulti);
-+        clReleaseProgram(this.programSingle);
++        clReleaseProgram(this.program);
 +    }
 +
 +    public void reset(long seed) {
@@ -972,28 +951,27 @@ index 0000000000000000000000000000000000000000..6bd83144406fc13a3cecd98d04fa2272
 +
 diff --git a/src/main/java/com/notsatvrn/hurricane/util/EntryPoint.java b/src/main/java/com/notsatvrn/hurricane/util/EntryPoint.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..a9160e03cfa2acb7869e5506295060df060bea6e
+index 0000000000000000000000000000000000000000..917bd5ea0349c02410641783afec4145d0e78b15
 --- /dev/null
 +++ b/src/main/java/com/notsatvrn/hurricane/util/EntryPoint.java
-@@ -0,0 +1,21 @@
+@@ -0,0 +1,20 @@
 +package com.notsatvrn.hurricane.util;
 +
 +import com.notsatvrn.hurricane.accel.DeviceUtil;
 +
-+import org.bukkit.Bukkit;
-+import java.util.logging.Level;
-+import java.util.logging.Logger;
++import com.mojang.logging.LogUtils;
++import org.slf4j.Logger;
 +
 +public class EntryPoint {
-+    public static final Logger LOGGER = Bukkit.getLogger();
++    public static final Logger LOGGER = LogUtils.getLogger();
 +
 +    public static void start() {
-+        LOGGER.log(Level.INFO, "[Hurricane] Starting...");
-+        LOGGER.log(Level.INFO, "[Hurricane] Populating devices...");
++        LOGGER.info("[Hurricane] Starting...");
++        LOGGER.info("[Hurricane] Populating devices...");
 +        DeviceUtil.populateDevices();
-+        LOGGER.log(Level.INFO, "[Hurricane] Configuring devices...");
++        LOGGER.info("[Hurricane] Configuring devices...");
 +        DeviceUtil.configureDevices();
-+        LOGGER.log(Level.INFO, "[Hurricane] Started.");
++        LOGGER.info("[Hurricane] Started.");
 +    }
 +}
 +

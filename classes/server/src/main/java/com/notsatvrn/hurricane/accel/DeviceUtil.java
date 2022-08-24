@@ -20,12 +20,11 @@ import org.jocl.cl_kernel;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.ArrayList;
 
-import org.bukkit.Bukkit;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
 
 public class DeviceUtil {
-  public static final Logger LOGGER = Bukkit.getLogger();
+  public static final Logger LOGGER = LogUtils.getLogger();
   public static ArrayList<Device> devices = new ArrayList();
   public static int deviceCount = 0;
   public static ConcurrentHashMap<Integer, Device> deviceConfig = new ConcurrentHashMap();
@@ -69,14 +68,14 @@ public class DeviceUtil {
 
     for (int i = 0; i < dc; i++) {
       Device device = devices.get(i);
-      LOGGER.log(Level.INFO, "[Hurricane] Testing RNG on device " + Integer.toString(i) + " (" + device.getType() + ") (100,000,000 random 64-bit integers)...");
+      LOGGER.info("[Hurricane] Testing RNG on device " + Integer.toString(i) + " (" + device.getType() + ") (100,000,000 random 64-bit integers)...");
       ImprovedRandom rng = device.random();
 
       long start = System.nanoTime();
       rng.nextLongs(100_000_000);
       long end = System.nanoTime();
       long result = end - start;
-      LOGGER.log(Level.INFO, "[Hurricane] Took " + Long.toString(result) + " nanoseconds.");
+      LOGGER.info("[Hurricane] Took " + Long.toString(result) + " nanoseconds.");
       if (result < rngBestTime) {
         rngBestTime = result;
         rngBestDeviceID = i;
@@ -85,7 +84,7 @@ public class DeviceUtil {
       rng.destroy();
     }
 
-    LOGGER.log(Level.INFO, "[Hurricane] Best RNG device: " + Integer.toString(rngBestDeviceID) + " (" + rngBestDevice.getType() + ").");
+    LOGGER.info("[Hurricane] Best RNG device: " + Integer.toString(rngBestDeviceID) + " (" + rngBestDevice.getType() + ").");
 
     deviceConfig.put(0, rngBestDevice);
   }

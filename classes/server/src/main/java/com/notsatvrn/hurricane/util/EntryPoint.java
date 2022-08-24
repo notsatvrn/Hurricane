@@ -2,20 +2,19 @@ package com.notsatvrn.hurricane.util;
 
 import com.notsatvrn.hurricane.accel.DeviceUtil;
 
-import org.bukkit.Bukkit;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
 
 public class EntryPoint {
-    public static final Logger LOGGER = Bukkit.getLogger();
+    public static final Logger LOGGER = LogUtils.getLogger();
 
     public static void start() {
-        LOGGER.log(Level.INFO, "[Hurricane] Starting...");
-        LOGGER.log(Level.INFO, "[Hurricane] Populating devices...");
+        LOGGER.info("[Hurricane] Starting...");
+        LOGGER.info("[Hurricane] Populating devices...");
         DeviceUtil.populateDevices();
-        LOGGER.log(Level.INFO, "[Hurricane] Configuring devices...");
+        LOGGER.info("[Hurricane] Configuring devices...");
         DeviceUtil.configureDevices();
-        LOGGER.log(Level.INFO, "[Hurricane] Started.");
+        LOGGER.info("[Hurricane] Started.");
     }
 }
 
