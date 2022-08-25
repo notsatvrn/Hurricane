@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: notsatvrn <satvrn@gmx.com>
-Date: Wed, 24 Aug 2022 20:12:45 +0000
+Date: Thu, 25 Aug 2022 01:47:30 +0000
 Subject: [PATCH] Server Classes
 
 diff --git a/src/main/java/com/notsatvrn/hurricane/accel/Device.java b/src/main/java/com/notsatvrn/hurricane/accel/Device.java
@@ -25,10 +25,10 @@ index 0000000000000000000000000000000000000000..5dca4103c4e098ab648c7df6b01600ad
 +
 diff --git a/src/main/java/com/notsatvrn/hurricane/accel/DeviceUtil.java b/src/main/java/com/notsatvrn/hurricane/accel/DeviceUtil.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..7a375bba534e594ddb6b156ca6b3c75fe4190450
+index 0000000000000000000000000000000000000000..268aab0c6ab050566fec9fdf9967f6abffd206b6
 --- /dev/null
 +++ b/src/main/java/com/notsatvrn/hurricane/accel/DeviceUtil.java
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,112 @@
 +package com.notsatvrn.hurricane.accel;
 +
 +import com.notsatvrn.hurricane.accel.Device;
@@ -48,17 +48,17 @@ index 0000000000000000000000000000000000000000..7a375bba534e594ddb6b156ca6b3c75f
 +import org.jocl.cl_queue_properties;
 +import org.jocl.cl_kernel;
 +
-+import java.util.concurrent.ConcurrentHashMap;
-+import java.util.ArrayList;
++import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
++import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 +
 +import com.mojang.logging.LogUtils;
 +import org.slf4j.Logger;
 +
 +public class DeviceUtil {
 +  public static final Logger LOGGER = LogUtils.getLogger();
-+  public static ArrayList<Device> devices = new ArrayList();
++  public static ObjectArrayList<Device> devices = new ObjectArrayList();
 +  public static int deviceCount = 0;
-+  public static ConcurrentHashMap<Integer, Device> deviceConfig = new ConcurrentHashMap();
++  public static Int2ObjectOpenHashMap<Device> deviceConfig = new Int2ObjectOpenHashMap();
 +  public static cl_context_properties ctxProp = null;
 +  public static cl_queue_properties queueProp = null;
 +
@@ -93,31 +93,41 @@ index 0000000000000000000000000000000000000000..7a375bba534e594ddb6b156ca6b3c75f
 +
 +  public static void configureDevices() {
 +    int dc = devices.size();
-+    long rngBestTime = Long.MAX_VALUE;
-+    int rngBestDeviceID = 0;
-+    Device rngBestDevice = null;
 +
-+    for (int i = 0; i < dc; i++) {
-+      Device device = devices.get(i);
-+      LOGGER.info("[Hurricane] Testing RNG on device " + Integer.toString(i) + " (" + device.getType() + ") (100,000,000 random 64-bit integers)...");
-+      ImprovedRandom rng = device.random();
++    if (HurricaneConfig.acceleratedRandom) {
++      LOGGER.info("[Hurricane] Testing accelerated RNG.");
 +
-+      long start = System.nanoTime();
-+      rng.nextLongs(100_000_000);
-+      long end = System.nanoTime();
-+      long result = end - start;
-+      LOGGER.info("[Hurricane] Took " + Long.toString(result) + " nanoseconds.");
-+      if (result < rngBestTime) {
-+        rngBestTime = result;
-+        rngBestDeviceID = i;
-+        rngBestDevice = device;
++      long rngBestTime = Long.MAX_VALUE;
++      int rngBestDeviceID = 0;
++      Device rngBestDevice = null;
++
++      int rngNums = HurricaneConfig.acceleratedRandomThresh + 1;
++
++      for (int i = 0; i < dc; i++) {
++        Device device = devices.get(i);
++        LOGGER.info("[Hurricane] Testing RNG on device " + Integer.toString(i) + " (" + device.getType() + ") (" + Integer.toString(rngNums) + " random 64-bit integers)...");
++        ImprovedRandom rng = device.random();
++
++        long start = System.nanoTime();
++        rng.nextLongs(rngNums);
++        long end = System.nanoTime();
++        long result = end - start;
++        LOGGER.info("[Hurricane] Took " + Long.toString(result) + " nanoseconds.");
++        if (result < rngBestTime) {
++          rngBestTime = result;
++          rngBestDeviceID = i;
++          rngBestDevice = device;
++        }
++        rng.destroy();
 +      }
-+      rng.destroy();
++
++      LOGGER.info("[Hurricane] Best RNG device: " + Integer.toString(rngBestDeviceID) + " (" + rngBestDevice.getType() + ").");
++
++      deviceConfig.put(0, rngBestDevice);
++    } else {
++      LOGGER.info("[Hurricane] Using non-accelerated RNG.");
++      deviceConfig.put(0, devices.get(0));
 +    }
-+
-+    LOGGER.info("[Hurricane] Best RNG device: " + Integer.toString(rngBestDeviceID) + " (" + rngBestDevice.getType() + ").");
-+
-+    deviceConfig.put(0, rngBestDevice);
 +  }
 +
 +  public static void destroyDevices() {
@@ -244,10 +254,10 @@ index 0000000000000000000000000000000000000000..7019e80c171fa787161faaf62ca3e6f1
 +
 diff --git a/src/main/java/com/notsatvrn/hurricane/accel/random/CLRandom.java b/src/main/java/com/notsatvrn/hurricane/accel/random/CLRandom.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..a058c86f91d2028dc9088836dcd7fdb308922009
+index 0000000000000000000000000000000000000000..09a1beca383a87bd1c3ff873fec496daf2ef54d3
 --- /dev/null
 +++ b/src/main/java/com/notsatvrn/hurricane/accel/random/CLRandom.java
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,188 @@
 +package com.notsatvrn.hurricane.accel.random;
 +
 +import static org.jocl.CL.clCreateProgramWithSource;
@@ -274,20 +284,21 @@ index 0000000000000000000000000000000000000000..a058c86f91d2028dc9088836dcd7fdb3
 +
 +import com.notsatvrn.hurricane.accel.random.IImprovedRandom;
 +import com.notsatvrn.hurricane.accel.random.ImprovedRandom;
++import com.notsatvrn.hurricane.config.HurricaneConfig;
 +import com.notsatvrn.hurricane.accel.device.CLDevice;
++import com.notsatvrn.hurricane.util.MathUtil;
 +
 +import java.util.concurrent.atomic.AtomicLong;
-+import java.util.Arrays;
 +
 +import lombok.NonNull;
 +
 +public class CLRandom extends ImprovedRandom implements IImprovedRandom {
-+    public long x = IImprovedRandom.createSeed();
-+    public long y = 362436069L;
-+    public long z = 521288629L;
-+    public long w = 88675123L;
-+    public long v = 5783321L;
-+    public long d = 6615241L;
++    private long x = IImprovedRandom.createSeed();
++    private long y = 362436069L;
++    private long z = 521288629L;
++    private long w = 88675123L;
++    private long v = 5783321L;
++    private long d = 6615241L;
 +
 +    private static final String[] kernelString = new String[]{"""
 +    __kernel void nextLong(__global long *id, __global long *ov) {
@@ -326,49 +337,32 @@ index 0000000000000000000000000000000000000000..a058c86f91d2028dc9088836dcd7fdb3
 +        clBuildProgram(this.program, 0, null, null, null, null);
 +    }
 +
++    // CPU RNG is always faster for small data operations, such as single increments
 +    @Override
 +    public long nextLong() {
-+        long[] inData = new long[]{this.x, this.y, this.z, this.w, this.v, this.d};
-+        long[] outData = new long[1];
-+
-+        cl_mem inputMemAddress = clCreateBuffer(this.device.ctx,
-+            CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
-+            size6, Pointer.to(inData), null);
-+        cl_mem outputMemAddress = clCreateBuffer(this.device.ctx,
-+            CL_MEM_READ_WRITE,
-+            Sizeof.cl_long, null, null);
-+
-+        cl_kernel kernel = clCreateKernel(this.program, "nextLong", null);
-+
-+        clSetKernelArg(kernel, 0, Sizeof.cl_mem, Pointer.to(inputMemAddress));
-+        clSetKernelArg(kernel, 1, Sizeof.cl_mem, Pointer.to(outputMemAddress));
-+
-+        clEnqueueNDRangeKernel(this.device.queue, kernel, 1, null,
-+            new long[]{1}, null, 0, null, null);
-+
-+        clEnqueueReadBuffer(this.device.queue, outputMemAddress, CL_TRUE, 0,
-+            Sizeof.cl_long, Pointer.to(outData), 0, null, null);
-+
-+        clReleaseMemObject(inputMemAddress);
-+        clReleaseMemObject(outputMemAddress);
-+        clReleaseKernel(kernel);
-+
-+        this.x = inData[0];
-+        this.y = inData[1];
-+        this.z = inData[2];
-+        this.w = inData[3];
-+        this.v = inData[4];
-+        this.d = inData[5];
-+
-+        return outData[0];
++        long t = (x ^ (x >> 2));
++        x = y;
++        y = z;
++        z = w;
++        w = v;
++        v = (v ^ (v << 4)) ^ (t ^ (t << 1));
++        return (d += 362437) + v;
 +    }
 +
 +    @Override
 +    public long[] nextLongs(int n) {
++        long[] outData = new long[n];
++
++        if (n < HurricaneConfig.acceleratedRandomThresh) {
++            for (int i = 0; i < n; i++) {
++                outData[i] = nextLong();
++            }
++            return outData;
++        }
++
 +        long outSize = Sizeof.cl_long * n;
 +
 +        long[] inData = new long[]{this.x, this.y, this.z, this.w, this.v, this.d};
-+        long[] outData = new long[n];
 +
 +        cl_mem inputMemAddress = clCreateBuffer(this.device.ctx,
 +            CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
@@ -400,6 +394,42 @@ index 0000000000000000000000000000000000000000..a058c86f91d2028dc9088836dcd7fdb3
 +        this.d = inData[5];
 +
 +        return outData;
++    }
++
++    public int[] nextInts(int n) {
++        long[] longs = nextLongs(n);
++        int[] data = new int[n];
++        for (int i = 0; i < n; i++) {
++            data[i] = MathUtil.long2int(longs[i]);
++        }
++        return data;
++    }
++
++    public boolean[] nextBooleans(int n) {
++        long[] longs = nextLongs(n);
++        boolean[] data = new boolean[n];
++        for (int i = 0; i < n; i++) {
++            data[i] = MathUtil.long2boolean(longs[i]);
++        }
++        return data;
++    }
++
++    public float[] nextFloats(int n) {
++        long[] longs = nextLongs(n);
++        float[] data = new float[n];
++        for (int i = 0; i < n; i++) {
++            data[i] = MathUtil.long2float(longs[i]);
++        }
++        return data;
++    }
++
++    public double[] nextDoubles(int n) {
++        long[] longs = nextLongs(n);
++        double[] data = new double[n];
++        for (int i = 0; i < n; i++) {
++            data[i] = MathUtil.long2double(longs[i]);
++        }
++        return data;
 +    }
 +
 +    public void destroy() {
@@ -465,10 +495,10 @@ index 0000000000000000000000000000000000000000..aaf956979d67bfd25d410faedccaa81d
 +
 diff --git a/src/main/java/com/notsatvrn/hurricane/accel/random/IImprovedRandom.java b/src/main/java/com/notsatvrn/hurricane/accel/random/IImprovedRandom.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..0acfd405eefceb55fc4db5088019315d97ca3376
+index 0000000000000000000000000000000000000000..042531330d2ad1da217d6ff100ba80aa56caf252
 --- /dev/null
 +++ b/src/main/java/com/notsatvrn/hurricane/accel/random/IImprovedRandom.java
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,46 @@
 +package com.notsatvrn.hurricane.accel.random;
 +
 +import java.util.concurrent.atomic.AtomicLong;
@@ -502,6 +532,18 @@ index 0000000000000000000000000000000000000000..0acfd405eefceb55fc4db5088019315d
 +    }
 +
 +    public void reset(long seed);
++
++    public int[] nextInts(int n);
++
++    public long[] nextLongs(int n);
++
++    public boolean[] nextBooleans(int n);
++
++    public float[] nextFloats(int n);
++
++    public double[] nextDoubles(int n);
++
++    public double[] nextGaussians(int n);
 +}
 diff --git a/src/main/java/com/notsatvrn/hurricane/accel/random/ImprovedRandom.java b/src/main/java/com/notsatvrn/hurricane/accel/random/ImprovedRandom.java
 new file mode 100644
@@ -689,10 +731,10 @@ index 0000000000000000000000000000000000000000..e7e156294c1e7f4fdadaa1545cb9523c
 +
 diff --git a/src/main/java/com/notsatvrn/hurricane/config/HurricaneConfig.java b/src/main/java/com/notsatvrn/hurricane/config/HurricaneConfig.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..f6ac13bb346acc93d5ebe606346d864858590d20
+index 0000000000000000000000000000000000000000..7710059584f58dd5da66d300733372e15a7741db
 --- /dev/null
 +++ b/src/main/java/com/notsatvrn/hurricane/config/HurricaneConfig.java
-@@ -0,0 +1,155 @@
+@@ -0,0 +1,166 @@
 +package com.notsatvrn.hurricane.config;
 +
 +import com.google.common.base.Throwables;
@@ -703,7 +745,9 @@ index 0000000000000000000000000000000000000000..f6ac13bb346acc93d5ebe606346d8648
 +import org.bukkit.configuration.ConfigurationSection;
 +import org.bukkit.configuration.InvalidConfigurationException;
 +import org.bukkit.configuration.file.YamlConfiguration;
++
 +import com.notsatvrn.hurricane.commands.HurricaneCommand;
++import com.notsatvrn.hurricane.accel.DeviceUtil;
 +
 +import java.io.File;
 +import java.io.IOException;
@@ -749,6 +793,9 @@ index 0000000000000000000000000000000000000000..f6ac13bb346acc93d5ebe606346d8648
 +        set("config-version", 1);
 +
 +        readConfig(HurricaneConfig.class, null);
++
++        Bukkit.getLogger().log(Level.INFO, "[Hurricane] Configuring devices...");
++        DeviceUtil.configureDevices();
 +    }
 +
 +    protected static void log(String s) {
@@ -842,9 +889,15 @@ index 0000000000000000000000000000000000000000..f6ac13bb346acc93d5ebe606346d8648
 +    }
 +
 +    // Prefer Accelerated Random
-+    public static boolean acceleratedRandom = false;
++    public static boolean acceleratedRandom = true;
 +    private static void acceleratedRandom() {
-+        acceleratedRandom = getBoolean("settings.acceleration.random", acceleratedRandom);
++        acceleratedRandom = getBoolean("settings.acceleration.random.enabled", acceleratedRandom);
++    }
++
++    // Accelerated Random Threshold
++    public static int acceleratedRandomThresh = 50000;
++    private static void acceleratedRandomThresh() {
++        acceleratedRandomThresh = getInt("settings.acceleration.random.threshold", acceleratedRandomThresh);
 +    }
 +}
 +
@@ -951,10 +1004,10 @@ index 0000000000000000000000000000000000000000..6bd83144406fc13a3cecd98d04fa2272
 +
 diff --git a/src/main/java/com/notsatvrn/hurricane/util/EntryPoint.java b/src/main/java/com/notsatvrn/hurricane/util/EntryPoint.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..917bd5ea0349c02410641783afec4145d0e78b15
+index 0000000000000000000000000000000000000000..73855a2a22b7fbd3f803cb7832c4c0d5f98ad81d
 --- /dev/null
 +++ b/src/main/java/com/notsatvrn/hurricane/util/EntryPoint.java
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,18 @@
 +package com.notsatvrn.hurricane.util;
 +
 +import com.notsatvrn.hurricane.accel.DeviceUtil;
@@ -969,8 +1022,6 @@ index 0000000000000000000000000000000000000000..917bd5ea0349c02410641783afec4145
 +        LOGGER.info("[Hurricane] Starting...");
 +        LOGGER.info("[Hurricane] Populating devices...");
 +        DeviceUtil.populateDevices();
-+        LOGGER.info("[Hurricane] Configuring devices...");
-+        DeviceUtil.configureDevices();
 +        LOGGER.info("[Hurricane] Started.");
 +    }
 +}

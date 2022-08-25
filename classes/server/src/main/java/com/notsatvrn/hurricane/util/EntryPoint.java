@@ -12,8 +12,6 @@ public class EntryPoint {
         LOGGER.info("[Hurricane] Starting...");
         LOGGER.info("[Hurricane] Populating devices...");
         DeviceUtil.populateDevices();
-        LOGGER.info("[Hurricane] Configuring devices...");
-        DeviceUtil.configureDevices();
         LOGGER.info("[Hurricane] Started.");
     }
 }

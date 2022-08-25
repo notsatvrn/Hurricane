@@ -8,7 +8,9 @@ import org.bukkit.command.Command;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
+
 import com.notsatvrn.hurricane.commands.HurricaneCommand;
+import com.notsatvrn.hurricane.accel.DeviceUtil;
 
 import java.io.File;
 import java.io.IOException;
@@ -54,6 +56,9 @@ public class HurricaneConfig {
         set("config-version", 1);
 
         readConfig(HurricaneConfig.class, null);
+
+        Bukkit.getLogger().log(Level.INFO, "[Hurricane] Configuring devices...");
+        DeviceUtil.configureDevices();
     }
 
     protected static void log(String s) {
@@ -147,9 +152,15 @@ public class HurricaneConfig {
     }
 
     // Prefer Accelerated Random
-    public static boolean acceleratedRandom = false;
+    public static boolean acceleratedRandom = true;
     private static void acceleratedRandom() {
-        acceleratedRandom = getBoolean("settings.acceleration.random", acceleratedRandom);
+        acceleratedRandom = getBoolean("settings.acceleration.random.enabled", acceleratedRandom);
+    }
+
+    // Accelerated Random Threshold
+    public static int acceleratedRandomThresh = 50000;
+    private static void acceleratedRandomThresh() {
+        acceleratedRandomThresh = getInt("settings.acceleration.random.threshold", acceleratedRandomThresh);
     }
 }
 

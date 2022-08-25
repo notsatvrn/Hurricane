@@ -31,4 +31,16 @@ public interface IImprovedRandom {
     }
 
     public void reset(long seed);
+
+    public int[] nextInts(int n);
+
+    public long[] nextLongs(int n);
+
+    public boolean[] nextBooleans(int n);
+
+    public float[] nextFloats(int n);
+
+    public double[] nextDoubles(int n);
+
+    public double[] nextGaussians(int n);
 }

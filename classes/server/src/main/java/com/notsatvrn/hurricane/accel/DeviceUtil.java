@@ -17,17 +17,17 @@ import org.jocl.cl_context_properties;
 import org.jocl.cl_queue_properties;
 import org.jocl.cl_kernel;
 
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.ArrayList;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 
 public class DeviceUtil {
   public static final Logger LOGGER = LogUtils.getLogger();
-  public static ArrayList<Device> devices = new ArrayList();
+  public static ObjectArrayList<Device> devices = new ObjectArrayList();
   public static int deviceCount = 0;
-  public static ConcurrentHashMap<Integer, Device> deviceConfig = new ConcurrentHashMap();
+  public static Int2ObjectOpenHashMap<Device> deviceConfig = new Int2ObjectOpenHashMap();
   public static cl_context_properties ctxProp = null;
   public static cl_queue_properties queueProp = null;
 
@@ -62,31 +62,41 @@ public class DeviceUtil {
 
   public static void configureDevices() {
     int dc = devices.size();
-    long rngBestTime = Long.MAX_VALUE;
-    int rngBestDeviceID = 0;
-    Device rngBestDevice = null;
 
-    for (int i = 0; i < dc; i++) {
-      Device device = devices.get(i);
-      LOGGER.info("[Hurricane] Testing RNG on device " + Integer.toString(i) + " (" + device.getType() + ") (100,000,000 random 64-bit integers)...");
-      ImprovedRandom rng = device.random();
+    if (HurricaneConfig.acceleratedRandom) {
+      LOGGER.info("[Hurricane] Testing accelerated RNG.");
 
-      long start = System.nanoTime();
-      rng.nextLongs(100_000_000);
-      long end = System.nanoTime();
-      long result = end - start;
-      LOGGER.info("[Hurricane] Took " + Long.toString(result) + " nanoseconds.");
-      if (result < rngBestTime) {
-        rngBestTime = result;
-        rngBestDeviceID = i;
-        rngBestDevice = device;
+      long rngBestTime = Long.MAX_VALUE;
+      int rngBestDeviceID = 0;
+      Device rngBestDevice = null;
+
+      int rngNums = HurricaneConfig.acceleratedRandomThresh + 1;
+
+      for (int i = 0; i < dc; i++) {
+        Device device = devices.get(i);
+        LOGGER.info("[Hurricane] Testing RNG on device " + Integer.toString(i) + " (" + device.getType() + ") (" + Integer.toString(rngNums) + " random 64-bit integers)...");
+        ImprovedRandom rng = device.random();
+
+        long start = System.nanoTime();
+        rng.nextLongs(rngNums);
+        long end = System.nanoTime();
+        long result = end - start;
+        LOGGER.info("[Hurricane] Took " + Long.toString(result) + " nanoseconds.");
+        if (result < rngBestTime) {
+          rngBestTime = result;
+          rngBestDeviceID = i;
+          rngBestDevice = device;
+        }
+        rng.destroy();
       }
-      rng.destroy();
+
+      LOGGER.info("[Hurricane] Best RNG device: " + Integer.toString(rngBestDeviceID) + " (" + rngBestDevice.getType() + ").");
+
+      deviceConfig.put(0, rngBestDevice);
+    } else {
+      LOGGER.info("[Hurricane] Using non-accelerated RNG.");
+      deviceConfig.put(0, devices.get(0));
     }
-
-    LOGGER.info("[Hurricane] Best RNG device: " + Integer.toString(rngBestDeviceID) + " (" + rngBestDevice.getType() + ").");
-
-    deviceConfig.put(0, rngBestDevice);
   }
 
   public static void destroyDevices() {

@@ -24,20 +24,21 @@ import org.jocl.cl_program;
 
 import com.notsatvrn.hurricane.accel.random.IImprovedRandom;
 import com.notsatvrn.hurricane.accel.random.ImprovedRandom;
+import com.notsatvrn.hurricane.config.HurricaneConfig;
 import com.notsatvrn.hurricane.accel.device.CLDevice;
+import com.notsatvrn.hurricane.util.MathUtil;
 
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.Arrays;
 
 import lombok.NonNull;
 
 public class CLRandom extends ImprovedRandom implements IImprovedRandom {
-    public long x = IImprovedRandom.createSeed();
-    public long y = 362436069L;
-    public long z = 521288629L;
-    public long w = 88675123L;
-    public long v = 5783321L;
-    public long d = 6615241L;
+    private long x = IImprovedRandom.createSeed();
+    private long y = 362436069L;
+    private long z = 521288629L;
+    private long w = 88675123L;
+    private long v = 5783321L;
+    private long d = 6615241L;
 
     private static final String[] kernelString = new String[]{"""
     __kernel void nextLong(__global long *id, __global long *ov) {
@@ -76,49 +77,32 @@ public class CLRandom extends ImprovedRandom implements IImprovedRandom {
         clBuildProgram(this.program, 0, null, null, null, null);
     }
 
+    // CPU RNG is always faster for small data operations, such as single increments
     @Override
     public long nextLong() {
-        long[] inData = new long[]{this.x, this.y, this.z, this.w, this.v, this.d};
-        long[] outData = new long[1];
-
-        cl_mem inputMemAddress = clCreateBuffer(this.device.ctx,
-            CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
-            size6, Pointer.to(inData), null);
-        cl_mem outputMemAddress = clCreateBuffer(this.device.ctx,
-            CL_MEM_READ_WRITE,
-            Sizeof.cl_long, null, null);
-
-        cl_kernel kernel = clCreateKernel(this.program, "nextLong", null);
-
-        clSetKernelArg(kernel, 0, Sizeof.cl_mem, Pointer.to(inputMemAddress));
-        clSetKernelArg(kernel, 1, Sizeof.cl_mem, Pointer.to(outputMemAddress));
-
-        clEnqueueNDRangeKernel(this.device.queue, kernel, 1, null,
-            new long[]{1}, null, 0, null, null);
-
-        clEnqueueReadBuffer(this.device.queue, outputMemAddress, CL_TRUE, 0,
-            Sizeof.cl_long, Pointer.to(outData), 0, null, null);
-
-        clReleaseMemObject(inputMemAddress);
-        clReleaseMemObject(outputMemAddress);
-        clReleaseKernel(kernel);
-
-        this.x = inData[0];
-        this.y = inData[1];
-        this.z = inData[2];
-        this.w = inData[3];
-        this.v = inData[4];
-        this.d = inData[5];
-
-        return outData[0];
+        long t = (x ^ (x >> 2));
+        x = y;
+        y = z;
+        z = w;
+        w = v;
+        v = (v ^ (v << 4)) ^ (t ^ (t << 1));
+        return (d += 362437) + v;
     }
 
     @Override
     public long[] nextLongs(int n) {
+        long[] outData = new long[n];
+
+        if (n < HurricaneConfig.acceleratedRandomThresh) {
+            for (int i = 0; i < n; i++) {
+                outData[i] = nextLong();
+            }
+            return outData;
+        }
+
         long outSize = Sizeof.cl_long * n;
 
         long[] inData = new long[]{this.x, this.y, this.z, this.w, this.v, this.d};
-        long[] outData = new long[n];
 
         cl_mem inputMemAddress = clCreateBuffer(this.device.ctx,
             CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
@@ -150,6 +134,42 @@ public class CLRandom extends ImprovedRandom implements IImprovedRandom {
         this.d = inData[5];
 
         return outData;
+    }
+
+    public int[] nextInts(int n) {
+        long[] longs = nextLongs(n);
+        int[] data = new int[n];
+        for (int i = 0; i < n; i++) {
+            data[i] = MathUtil.long2int(longs[i]);
+        }
+        return data;
+    }
+
+    public boolean[] nextBooleans(int n) {
+        long[] longs = nextLongs(n);
+        boolean[] data = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            data[i] = MathUtil.long2boolean(longs[i]);
+        }
+        return data;
+    }
+
+    public float[] nextFloats(int n) {
+        long[] longs = nextLongs(n);
+        float[] data = new float[n];
+        for (int i = 0; i < n; i++) {
+            data[i] = MathUtil.long2float(longs[i]);
+        }
+        return data;
+    }
+
+    public double[] nextDoubles(int n) {
+        long[] longs = nextLongs(n);
+        double[] data = new double[n];
+        for (int i = 0; i < n; i++) {
+            data[i] = MathUtil.long2double(longs[i]);
+        }
+        return data;
     }
 
     public void destroy() {
