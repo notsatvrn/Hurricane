@@ -1,14 +1,14 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Encode42 <me@encode42.dev>
-Date: Thu, 16 Sep 2021 20:32:04 -0400
-Subject: [PATCH] Hurricane config files
+From: BillyGalbreath <blake.galbreath@gmail.com>
+Date: Sun, 12 Jun 2022 10:57:51 -0500
+Subject: [PATCH] Hurricane: Config Files
 
 
 diff --git a/src/main/java/org/bukkit/Server.java b/src/main/java/org/bukkit/Server.java
-index 5d1668c6f368843ec071df7d65dbd0a29be545d0..5c3b19c941c9ea471ecc022dca4dda862956e08d 100644
+index aaef58468a3c31f35e5067ed4263e9dd3fbddddd..32479d4f34ea7be1dc0d905e41e8c81c59864edc 100644
 --- a/src/main/java/org/bukkit/Server.java
 +++ b/src/main/java/org/bukkit/Server.java
-@@ -1909,6 +1909,13 @@ public interface Server extends PluginMessageRecipient, net.kyori.adventure.audi
+@@ -2133,6 +2133,13 @@ public interface Server extends PluginMessageRecipient, net.kyori.adventure.audi
          }
          // Purpur end
  

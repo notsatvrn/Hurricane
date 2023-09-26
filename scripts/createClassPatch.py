@@ -6,7 +6,10 @@ import subprocess
 import pathlib
 import shutil
 import os
+from zoneinfo import ZoneInfo
 from datetime import datetime
+
+LOCAL_TZ = ZoneInfo("localtime")
 
 script_path = os.path.realpath(__file__)
 class_dir = str(pathlib.Path(f"{script_path}/../../classes/").resolve())
@@ -45,9 +48,9 @@ def create_strings(paths):
         patches[tlower] = {}
         os.chdir(source_dirs[tlower])
         patches[tlower] = "From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\n"
-        patches[tlower] += "From: notsatvrn <satvrn@gmx.com>\n"
-        patches[tlower] += f"Date: {datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S +0000')}\n"
-        patches[tlower] += f"Subject: [PATCH] {type} Classes\n\n"
+        patches[tlower] += "From: satvrn <pastawho@gmail.com>\n"
+        patches[tlower] += f"Date: {datetime.now(tz=LOCAL_TZ).strftime('%a, %d %b %Y %H:%M:%S %z')}\n"
+        patches[tlower] += f"Subject: [PATCH] Hurricane {type} Classes\n\n\n"
         real_paths = paths[tlower]["real"]
         patch_paths = paths[tlower]["patch"]
         source_dir = source_dirs[tlower]
@@ -75,4 +78,5 @@ def create_patches(strings):
         f.write(strings[tlower])
         f.close()
 
-create_patches(create_strings(get_paths()))
+if __name__ == "__main__":
+    create_patches(create_strings(get_paths()))
